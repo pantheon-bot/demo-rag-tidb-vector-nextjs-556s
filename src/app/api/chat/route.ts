@@ -1,13 +1,13 @@
 import { openai } from '@ai-sdk/openai';
-import { streamText, embed } from 'ai';
+import { streamText, embed, convertToModelMessages, type UIMessage } from 'ai';
 import { searchSimilarChunks } from '@/lib/db/rag';
-import { saveMessage, getSessionHistory } from '@/lib/db/messages';
+import { saveMessage } from '@/lib/db/messages';
 
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
   try {
-    const { messages, sessionId } = await req.json();
+    const { messages, sessionId }: { messages: UIMessage[]; sessionId?: string } = await req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response('Invalid messages format', { status: 400 });
@@ -22,13 +22,19 @@ export async function POST(req: Request) {
     // Use sessionId or generate a default one
     const activeSessionId = sessionId || 'default';
 
+    // Extract text content from the user message
+    const userText = userMessage.parts
+      .filter(part => part.type === 'text')
+      .map(part => 'text' in part ? part.text : '')
+      .join(' ');
+
     // Save user message to database
-    await saveMessage(activeSessionId, 'user', userMessage.content);
+    await saveMessage(activeSessionId, 'user', userText);
 
     // Generate embedding for the user query
     const { embedding } = await embed({
       model: openai.embedding('text-embedding-3-small'),
-      value: userMessage.content,
+      value: userText,
     });
 
     // Perform vector similarity search to find relevant context
@@ -40,9 +46,6 @@ export async function POST(req: Request) {
         `[${idx + 1}] ${chunk.content} (relevance: ${(1 - chunk.distance).toFixed(3)})`
       )
       .join('\n\n');
-
-    // Get recent conversation history
-    const history = await getSessionHistory(activeSessionId, 10);
 
     // Build messages for the LLM
     const systemPrompt = `You are a helpful AI assistant with knowledge about TiDB, vector search, and RAG systems.
@@ -58,28 +61,23 @@ Guidelines:
 - Be concise but thorough
 - If you're unsure, admit it`;
 
-    // Prepare chat history for the model
-    const chatHistory = history
-      .slice(-10) // Last 10 messages
-      .map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content,
-      }));
+    // Convert UI messages to model messages format
+    const modelMessages = convertToModelMessages(messages);
 
     // Stream the AI response
     const result = streamText({
       model: openai('gpt-4o-mini'),
       system: systemPrompt,
-      messages: [...chatHistory, { role: 'user', content: userMessage.content }],
+      messages: modelMessages,
       temperature: 0.7,
-      maxTokens: 1000,
+      maxOutputTokens: 1000,
       async onFinish({ text }) {
         // Save assistant response to database
         await saveMessage(activeSessionId, 'assistant', text);
       },
     });
 
-    return result.toDataStreamResponse();
+    return result.toUIMessageStreamResponse();
   } catch (error) {
     console.error('Chat API error:', error);
     return new Response(
