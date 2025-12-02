@@ -7,19 +7,52 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Plus } from 'lucide-react';
 
 export function ChatInterface() {
-  const [sessionId] = useState(() => `session-${Date.now()}`);
+  // Use persistent session ID from localStorage
+  const [sessionId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      let id = localStorage.getItem('chatSessionId');
+      if (!id) {
+        id = `session-${Date.now()}`;
+        localStorage.setItem('chatSessionId', id);
+      }
+      return id;
+    }
+    return `session-${Date.now()}`;
+  });
+
   const [input, setInput] = useState('');
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, status, error, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
       body: { sessionId },
     }),
   });
+
+  // Load chat history on mount
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const response = await fetch(`/api/chat?sessionId=${sessionId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.messages && data.messages.length > 0) {
+            setMessages(data.messages);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+    loadHistory();
+  }, [sessionId, setMessages]);
 
   const isLoading = status === 'submitted';
 
@@ -30,11 +63,38 @@ export function ChatInterface() {
     }
   }, [messages]);
 
+  const handleNewChat = () => {
+    // Generate new session ID
+    const newSessionId = `session-${Date.now()}`;
+    localStorage.setItem('chatSessionId', newSessionId);
+    // Reload the page to start fresh
+    window.location.reload();
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold">RAG Chat Demo</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleNewChat}
+          className="gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          New Chat
+        </Button>
+      </div>
       <Card className="flex-1 flex flex-col overflow-hidden">
         <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-          {messages.length === 0 && (
+          {isLoadingHistory && (
+            <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin mb-2" />
+              <p className="text-sm">Loading chat history...</p>
+            </div>
+          )}
+
+          {!isLoadingHistory && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
               <h3 className="text-lg font-semibold mb-2">Welcome to RAG Chat Demo</h3>
               <p className="text-sm max-w-md">

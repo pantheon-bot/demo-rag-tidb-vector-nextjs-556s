@@ -1,9 +1,48 @@
 import { openai } from '@ai-sdk/openai';
 import { streamText, embed, convertToModelMessages, type UIMessage } from 'ai';
 import { searchSimilarChunks } from '@/lib/db/rag';
-import { saveMessage } from '@/lib/db/messages';
+import { saveMessage, getAllSessionMessages } from '@/lib/db/messages';
 
 export const maxDuration = 30;
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const sessionId = searchParams.get('sessionId');
+
+    if (!sessionId) {
+      return new Response(
+        JSON.stringify({ error: 'sessionId is required' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Retrieve all messages for the session
+    const dbMessages = await getAllSessionMessages(sessionId);
+
+    // Convert database messages to UI message format
+    const messages = dbMessages.map((msg) => ({
+      id: msg.id.toString(),
+      role: msg.role,
+      parts: [{ type: 'text' as const, text: msg.content }],
+      createdAt: new Date(msg.created_at),
+    }));
+
+    return new Response(
+      JSON.stringify({ messages }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  } catch (error) {
+    console.error('Failed to retrieve chat history:', error);
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to retrieve chat history',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+}
 
 export async function POST(req: Request) {
   try {
