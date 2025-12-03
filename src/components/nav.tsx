@@ -17,6 +17,9 @@ export function Nav() {
               <Link href="/">Chat</Link>
             </Button>
             <Button variant="ghost" asChild>
+              <Link href="/history">Chat History</Link>
+            </Button>
+            <Button variant="ghost" asChild>
               <Link href="/documents">Documents</Link>
             </Button>
           </div>
